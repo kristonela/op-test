@@ -27,13 +27,40 @@ env:
   TF_IN_AUTOMATION: 'true'
 
 jobs:
-  terraform:
-    name: 'Terraform ${{ matrix.environment }}'
+  # ========================================================================
+  # VALIDATION JOBS - Run in parallel for fast feedback
+  # ========================================================================
+
+  terraform-fmt:
+    name: 'Format Check'
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # @param pipeline.environments
-        environment: [aws]  # Add more environments as needed: [aws, kubernetes]
+        environment: [aws]
+      fail-fast: false
+
+    defaults:
+      run:
+        working-directory: ./terraform/${{ matrix.environment }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+
+  terraform-validate:
+    name: 'Validate ${{ matrix.environment }}'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        environment: [aws]
       fail-fast: false
 
     defaults:
@@ -42,7 +69,6 @@ jobs:
 
     permissions:
       contents: read
-      pull-requests: write  # For PR comments
 
     steps:
       - name: Checkout Repository
@@ -56,16 +82,72 @@ jobs:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          # Use static credentials (with optional session token for temporary credentials)
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Terraform Format Check
-        id: fmt
-        run: terraform fmt -check -recursive
-        continue-on-error: true
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=${{ matrix.environment }}/terraform.tfstate" \
+            -backend-config="region=${{ secrets.TF_STATE_BUCKET_REGION || env.AWS_REGION }}" \
+            -backend-config="encrypt=true"
+
+      - name: Terraform Validate
+        run: terraform validate -no-color
+
+  security-scan:
+    name: 'Security Scan (tfsec)'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Run tfsec
+        uses: aquasecurity/tfsec-action@v1.0.0
+        with:
+          working_directory: ./terraform
+          soft_fail: true
+
+  # ========================================================================
+  # PLAN JOB - Depends on validation passing
+  # ========================================================================
+
+  terraform-plan:
+    name: 'Plan ${{ matrix.environment }}'
+    runs-on: ubuntu-latest
+    needs: [terraform-fmt, terraform-validate, security-scan]
+    strategy:
+      matrix:
+        environment: [aws]
+      fail-fast: false
+
+    defaults:
+      run:
+        working-directory: ./terraform/${{ matrix.environment }}
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Terraform Init
         id: init
@@ -73,12 +155,8 @@ jobs:
           terraform init \
             -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
             -backend-config="key=${{ matrix.environment }}/terraform.tfstate" \
-            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="region=${{ secrets.TF_STATE_BUCKET_REGION || env.AWS_REGION }}" \
             -backend-config="encrypt=true"
-
-      - name: Terraform Validate
-        id: validate
-        run: terraform validate -no-color
 
       - name: Terraform Plan
         id: plan
@@ -89,64 +167,125 @@ jobs:
             -var="region=${{ env.AWS_REGION }}"
         continue-on-error: true
 
-      - name: Comment PR with Plan
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const output = `#### Terraform Format and Style 🖌\`${{ steps.fmt.outcome }}\`
-            #### Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
-            #### Terraform Validation 🤖\`${{ steps.validate.outcome }}\`
-            #### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
-
-            <details><summary>Show Plan</summary>
-
-            \`\`\`terraform
-            ${{ steps.plan.outputs.stdout }}
-            \`\`\`
-
-            </details>
-
-            *Environment: ${{ matrix.environment }}*
-            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
-
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: output
-            })
-
       - name: Terraform Plan Status
         if: steps.plan.outcome == 'failure'
         run: exit 1
 
-      # ========================================================================
-      # TERRAFORM APPLY - COMMENTED OUT FOR TESTING
-      # ========================================================================
-      # This step is currently disabled to prevent accidental infrastructure creation
-      # during pipeline testing. To enable automatic deployments:
-      # 1. Uncomment the lines below
-      # 2. Ensure all services are properly configured in terraform.auto.tfvars
-      # 3. Test with workflow_dispatch first before enabling auto-apply on push
-      # ========================================================================
-      # - name: Terraform Apply
-      #   if: |
-      #     github.ref == 'refs/heads/main' &&
-      #     github.event_name == 'push' ||
-      #     (github.event_name == 'workflow_dispatch' && github.event.inputs.terraform_action == 'apply')
-      #   run: terraform apply -auto-approve tfplan
-
-      - name: Terraform Destroy
-        if: |
-          github.event_name == 'workflow_dispatch' &&
-          github.event.inputs.terraform_action == 'destroy'
-        run: terraform destroy -auto-approve -var="region=${{ env.AWS_REGION }}"
-
       - name: Upload Terraform Plan
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: tfplan-${{ matrix.environment }}
           path: ./terraform/${{ matrix.environment }}/tfplan
-          retention-days: 30
+          retention-days: 7
+
+  # ========================================================================
+  # APPLY JOB - COMMENTED OUT FOR TESTING
+  # ========================================================================
+  # Uncomment this job when ready for production deployments
+  # This job will:
+  # - Download the plan artifact from the previous job
+  # - Apply the infrastructure changes automatically on main push
+  # - Or apply manually via workflow_dispatch with 'apply' action
+  # ========================================================================
+
+  # terraform-apply:
+  #   name: 'Apply ${{ matrix.environment }}'
+  #   runs-on: ubuntu-latest
+  #   needs: [terraform-plan]
+  #   if: |
+  #     github.ref == 'refs/heads/main' &&
+  #     github.event_name == 'push' ||
+  #     (github.event_name == 'workflow_dispatch' && github.event.inputs.terraform_action == 'apply')
+  #   strategy:
+  #     matrix:
+  #       environment: [aws]
+  #     fail-fast: false
+  #
+  #   defaults:
+  #     run:
+  #       working-directory: ./terraform/${{ matrix.environment }}
+  #
+  #   permissions:
+  #     contents: read
+  #
+  #   steps:
+  #     - name: Checkout Repository
+  #       uses: actions/checkout@v4
+  #
+  #     - name: Setup Terraform
+  #       uses: hashicorp/setup-terraform@v3
+  #       with:
+  #         terraform_version: ${{ env.TF_VERSION }}
+  #
+  #     - name: Configure AWS Credentials
+  #       uses: aws-actions/configure-aws-credentials@v4
+  #       with:
+  #         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  #         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  #         aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+  #         aws-region: ${{ env.AWS_REGION }}
+  #
+  #     - name: Terraform Init
+  #       run: |
+  #         terraform init \
+  #           -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+  #           -backend-config="key=${{ matrix.environment }}/terraform.tfstate" \
+  #           -backend-config="region=${{ secrets.TF_STATE_BUCKET_REGION || env.AWS_REGION }}" \
+  #           -backend-config="encrypt=true"
+  #
+  #     - name: Download Terraform Plan
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: tfplan-${{ matrix.environment }}
+  #         path: ./terraform/${{ matrix.environment }}
+  #
+  #     - name: Terraform Apply
+  #       run: terraform apply -auto-approve tfplan
+
+  # ========================================================================
+  # DESTROY JOB - Manual only
+  # ========================================================================
+
+  terraform-destroy:
+    name: 'Destroy ${{ matrix.environment }}'
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.terraform_action == 'destroy'
+    strategy:
+      matrix:
+        environment: [aws]
+      fail-fast: false
+
+    defaults:
+      run:
+        working-directory: ./terraform/${{ matrix.environment }}
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=${{ matrix.environment }}/terraform.tfstate" \
+            -backend-config="region=${{ secrets.TF_STATE_BUCKET_REGION || env.AWS_REGION }}" \
+            -backend-config="encrypt=true"
+
+      - name: Terraform Destroy
+        run: terraform destroy -auto-approve -var="region=${{ env.AWS_REGION }}"

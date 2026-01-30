@@ -1,11 +1,16 @@
 ---
 # GitLab CI/CD Pipeline for Terraform Deployment
-# This pipeline automatically deploys infrastructure when changes are pushed to main
+#
+# Pipeline Structure:
+# 1. VALIDATE stage - Format, validate, and security scan (parallel)
+# 2. PLAN stage - Generate terraform plan
+# 3. APPLY stage - Deploy infrastructure (commented out for testing)
+# 4. DESTROY stage - Destroy infrastructure (manual only)
 
 variables:
   # @param terraform.version
   TF_VERSION: "1.11"
-  TF_ROOT: ${CI_PROJECT_DIR}/templates/terraform
+  TF_ROOT: ${CI_PROJECT_DIR}/terraform
   TF_IN_AUTOMATION: "true"
   # @param aws.region
   AWS_REGION: ${AWS_REGION:-eu-west-1}
@@ -14,19 +19,23 @@ variables:
   TF_STATE_BUCKET: ${TF_STATE_BUCKET}
   TF_STATE_KEY: "${CI_ENVIRONMENT_NAME}/terraform.tfstate"
 
-# Cache Terraform plugins between jobs
+# Cache Terraform plugins between jobs for faster execution
 cache:
   key: "${CI_COMMIT_REF_SLUG}"
   paths:
     - ${TF_ROOT}/**/.terraform
     - ${TF_ROOT}/**/.terraform.lock.hcl
 
-# Define stages
+# Pipeline stages
 stages:
-  - validate
-  - plan
-  - apply
-  - destroy
+  - validate  # Fast feedback: format, validate, security scan
+  - plan      # Generate execution plan
+  - apply     # Deploy infrastructure (commented out)
+  - destroy   # Destroy infrastructure (manual only)
+
+# ========================================================================
+# SHARED TEMPLATES
+# ========================================================================
 
 # Base template for Terraform jobs
 .terraform_base:
@@ -61,9 +70,9 @@ stages:
     name: kubernetes
     deployment_tier: production
 
-###################
-# VALIDATE STAGE
-###################
+# ========================================================================
+# VALIDATE STAGE - Run in parallel for fast feedback
+# ========================================================================
 
 validate:format:
   stage: validate
@@ -97,9 +106,30 @@ validate:kubernetes:
     - if: '$CI_COMMIT_BRANCH == "main"'
   allow_failure: true  # Optional environment
 
-###################
-# PLAN STAGE
-###################
+# Security scanning with tfsec
+security:tfsec:
+  stage: validate
+  image:
+    name: aquasec/tfsec:latest
+    entrypoint: [""]
+  script:
+    - tfsec ${TF_ROOT} --format json --out tfsec-report.json || true
+    - tfsec ${TF_ROOT} --format default
+  artifacts:
+    name: "tfsec-report-${CI_COMMIT_SHORT_SHA}"
+    paths:
+      - tfsec-report.json
+    expire_in: 30 days
+    reports:
+      sast: tfsec-report.json
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+  allow_failure: true
+
+# ========================================================================
+# PLAN STAGE - Generate execution plan
+# ========================================================================
 
 plan:aws:
   extends: .aws_environment
@@ -145,17 +175,15 @@ plan:kubernetes:
     - if: '$CI_COMMIT_BRANCH == "main"'
   allow_failure: true  # Optional environment
 
-###################
-# APPLY STAGE
-###################
 # ========================================================================
-# TERRAFORM APPLY - COMMENTED OUT FOR TESTING
+# APPLY STAGE - COMMENTED OUT FOR TESTING
 # ========================================================================
-# These jobs are currently disabled to prevent accidental infrastructure
-# creation during pipeline testing. To enable automatic deployments:
-# 1. Uncomment the apply:aws and apply:kubernetes jobs below
-# 2. Ensure all services are properly configured in terraform.auto.tfvars
-# 3. Test with merge request first before enabling auto-apply on main
+# These jobs automatically apply infrastructure changes when:
+# - apply:aws: Runs on main branch push, or manual trigger on MR
+# - apply:kubernetes: Requires manual approval even on main branch
+#
+# IMPORTANT: For testing, these jobs are commented out to prevent
+# accidental infrastructure creation. Uncomment when ready for production.
 # ========================================================================
 
 # apply:aws:
@@ -202,9 +230,9 @@ plan:kubernetes:
 #       when: manual
 #   allow_failure: true  # Optional environment
 
-###################
-# DESTROY STAGE
-###################
+# ========================================================================
+# DESTROY STAGE - Manual destruction only
+# ========================================================================
 
 destroy:aws:
   extends: .aws_environment
@@ -229,27 +257,3 @@ destroy:kubernetes:
       when: manual  # Always require manual trigger for destroy
   dependencies: []
   allow_failure: true  # Optional environment
-
-###################
-# SECURITY SCANNING
-###################
-
-security:tfsec:
-  stage: validate
-  image:
-    name: aquasec/tfsec:latest
-    entrypoint: [""]
-  script:
-    - tfsec ${TF_ROOT} --format json --out tfsec-report.json || true
-    - tfsec ${TF_ROOT} --format default
-  artifacts:
-    name: "tfsec-report-${CI_COMMIT_SHORT_SHA}"
-    paths:
-      - tfsec-report.json
-    expire_in: 30 days
-    reports:
-      sast: tfsec-report.json
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: '$CI_COMMIT_BRANCH == "main"'
-  allow_failure: true
