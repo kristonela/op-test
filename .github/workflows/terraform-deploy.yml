@@ -121,12 +121,21 @@ jobs:
         if: steps.plan.outcome == 'failure'
         run: exit 1
 
-      - name: Terraform Apply
-        if: |
-          github.ref == 'refs/heads/main' &&
-          github.event_name == 'push' ||
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.terraform_action == 'apply')
-        run: terraform apply -auto-approve tfplan
+      # ========================================================================
+      # TERRAFORM APPLY - COMMENTED OUT FOR TESTING
+      # ========================================================================
+      # This step is currently disabled to prevent accidental infrastructure creation
+      # during pipeline testing. To enable automatic deployments:
+      # 1. Uncomment the lines below
+      # 2. Ensure all services are properly configured in terraform.auto.tfvars
+      # 3. Test with workflow_dispatch first before enabling auto-apply on push
+      # ========================================================================
+      # - name: Terraform Apply
+      #   if: |
+      #     github.ref == 'refs/heads/main' &&
+      #     github.event_name == 'push' ||
+      #     (github.event_name == 'workflow_dispatch' && github.event.inputs.terraform_action == 'apply')
+      #   run: terraform apply -auto-approve tfplan
 
       - name: Terraform Destroy
         if: |
