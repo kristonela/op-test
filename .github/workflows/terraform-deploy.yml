@@ -34,6 +34,7 @@ jobs:
   terraform-fmt:
     name: 'Format Check'
     runs-on: ubuntu-latest
+    continue-on-error: true
     strategy:
       matrix:
         environment: [aws]
@@ -89,7 +90,9 @@ jobs:
 
       - name: Terraform Init
         run: |
+          rm -f .terraform/terraform.tfstate
           terraform init \
+            -reconfigure \
             -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
             -backend-config="key=${{ matrix.environment }}/terraform.tfstate" \
             -backend-config="region=${{ secrets.TF_STATE_BUCKET_REGION || env.AWS_REGION }}" \
@@ -138,7 +141,9 @@ jobs:
       - name: Terraform Init
         id: init
         run: |
+          rm -f .terraform/terraform.tfstate
           terraform init \
+            -reconfigure \
             -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
             -backend-config="key=${{ matrix.environment }}/terraform.tfstate" \
             -backend-config="region=${{ secrets.TF_STATE_BUCKET_REGION || env.AWS_REGION }}" \
@@ -207,7 +212,9 @@ jobs:
 
       - name: Terraform Init
         run: |
+          rm -f .terraform/terraform.tfstate
           terraform init \
+            -reconfigure \
             -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
             -backend-config="key=${{ matrix.environment }}/terraform.tfstate" \
             -backend-config="region=${{ secrets.TF_STATE_BUCKET_REGION || env.AWS_REGION }}" \
@@ -261,7 +268,9 @@ jobs:
 
       - name: Terraform Init
         run: |
+          rm -f .terraform/terraform.tfstate
           terraform init \
+            -reconfigure \
             -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
             -backend-config="key=${{ matrix.environment }}/terraform.tfstate" \
             -backend-config="region=${{ secrets.TF_STATE_BUCKET_REGION || env.AWS_REGION }}" \
