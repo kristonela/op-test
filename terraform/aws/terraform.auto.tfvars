@@ -2,10 +2,12 @@
 # GLOBAL
 # -------------------------------------------------------------------
 
+# @param region
+region = "us-east-1"
 # @param name
-global_prefix = "test"
+global_prefix = "kp"
 # @param name
-environment = "test"
+environment = "kp"
 # @param global.environment_short
 environment_short = "dev"
 
@@ -393,3 +395,10 @@ route53_private_zones = false
 route53_force_destroy = false
 # @param services.route53.enableDnssec
 route53_enable_dnssec = false
+
+# -------------------------------------------------------------------
+# HELM CHARTS
+# -------------------------------------------------------------------
+
+# @param services.eks.helmCharts
+helm_charts = {}

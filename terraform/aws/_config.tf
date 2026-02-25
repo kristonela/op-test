@@ -2,17 +2,17 @@ terraform {
   required_version = "~> 1.11"
 
   # @section backend begin
-  backend "s3" {
-    # @param backend.s3.bucket
-    bucket = "my-terraform-state-bucket"
-    key    = "aws.tfstate"
-    # @param backend.s3.region
-    region = "eu-west-1"
-    # @param backend.s3.encrypt
-    encrypt = true
-    # @param backend.s3.useLockfile
-    use_lockfile = true
-  }
+  # backend "s3" {
+    # @param terraformBackend.bucketName
+    # bucket = "my-terraform-state-bucket"
+    # key    = "aws.tfstate"
+    # @param region
+    # region = "eu-west-1"
+    # @param terraformBackend.encrypt
+    # encrypt = true
+    # @param terraformBackend.useLockfile
+    # use_lockfile = true
+  # }
   # @section backend end
 
   required_providers {
@@ -36,7 +36,7 @@ provider "aws" {
 
   default_tags {
     tags = merge({
-      "Customer"  = "DevOpsGroup"
+      "OpenPrime" = "true"
       "Terraform" = "true"
     }, var.global_tags)
   }

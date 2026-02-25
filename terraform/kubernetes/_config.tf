@@ -2,17 +2,17 @@ terraform {
   required_version = "~> 1.11"
 
   # @section backend begin
-  backend "s3" {
-    # @param backend.s3.bucket
-    bucket = "my-terraform-state-bucket"
-    key    = "kubernetes.tfstate"
-    # @param backend.s3.region
-    region = "eu-west-1"
-    # @param backend.s3.encrypt
-    encrypt = true
-    # @param backend.s3.useLockfile
-    use_lockfile = true
-  }
+  # backend "s3" {
+    # @param terraformBackend.bucketName
+    # bucket = "my-terraform-state-bucket"
+    # key    = "kubernetes.tfstate"
+    # @param region
+    # region = "eu-west-1"
+    # @param terraformBackend.encrypt
+    # encrypt = true
+    # @param terraformBackend.useLockfile
+    # use_lockfile = true
+  # }
   # @section backend end
 
   required_providers {
@@ -47,7 +47,7 @@ provider "aws" {
 }
 
 provider "helm" {
-  kubernetes {
+  kubernetes = {
     host                   = data.terraform_remote_state.aws.outputs.eks_cluster_endpoint
     cluster_ca_certificate = base64decode(data.terraform_remote_state.aws.outputs.eks_certificate_authority_data)
     token                  = data.aws_eks_cluster_auth.eks.token
