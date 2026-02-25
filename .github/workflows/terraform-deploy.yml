@@ -235,7 +235,9 @@ jobs:
   terraform-destroy:
     name: 'Destroy ${{ matrix.environment }}'
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.terraform_action == 'destroy'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment:
+      name: production
     strategy:
       matrix:
         environment: [aws]
