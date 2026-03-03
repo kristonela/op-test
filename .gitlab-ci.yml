@@ -28,7 +28,8 @@ cache:
 
 # Pipeline stages
 stages:
-  - validate  # Fast feedback: format and validate
+  - format    # Auto-format Terraform code
+  - validate  # Validate Terraform configuration
   - plan      # Generate execution plan
   - apply     # Deploy infrastructure (manual approval required)
   - destroy   # Destroy infrastructure (manual only)
@@ -66,15 +67,14 @@ stages:
 # VALIDATE STAGE - Format and validate Terraform code
 # ========================================================================
 
-validate:format:
-  stage: validate
+format:aws:
+  stage: format
   image:
     name: hashicorp/terraform:${TF_VERSION}
     entrypoint: [""]
   script:
     - cd ${TF_ROOT}
-    - terraform fmt -check -recursive
-  allow_failure: true
+    - terraform fmt -recursive
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == "main"'
