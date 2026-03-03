@@ -28,7 +28,7 @@ env:
 
 jobs:
   # ========================================================================
-  # VALIDATION JOBS - Run in parallel for fast feedback
+  # FORMAT JOB
   # ========================================================================
 
   format-aws:
@@ -51,17 +51,18 @@ jobs:
       - name: Terraform Format
         run: terraform fmt -recursive
 
+  # ========================================================================
+  # VALIDATE JOB
+  # ========================================================================
+
   validate-aws:
     name: 'validate:aws'
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        environment: [aws]
-      fail-fast: false
+    needs: [format-aws]
 
     defaults:
       run:
-        working-directory: ./terraform/${{ matrix.environment }}
+        working-directory: ./terraform/aws
 
     permissions:
       contents: read
@@ -89,7 +90,7 @@ jobs:
           terraform init \
             -reconfigure \
             -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
-            -backend-config="key=${{ matrix.environment }}/terraform.tfstate" \
+            -backend-config="key=aws/terraform.tfstate" \
             -backend-config="region=${{ secrets.TF_STATE_BUCKET_REGION || env.AWS_REGION }}" \
             -backend-config="encrypt=true"
 
@@ -97,21 +98,17 @@ jobs:
         run: terraform validate -no-color
 
   # ========================================================================
-  # PLAN JOB - Depends on validation passing
+  # PLAN JOB
   # ========================================================================
 
   plan-aws:
     name: 'plan:aws'
     runs-on: ubuntu-latest
-    needs: [format-aws, validate-aws]
-    strategy:
-      matrix:
-        environment: [aws]
-      fail-fast: false
+    needs: [validate-aws]
 
     defaults:
       run:
-        working-directory: ./terraform/${{ matrix.environment }}
+        working-directory: ./terraform/aws
 
     permissions:
       contents: read
@@ -140,7 +137,7 @@ jobs:
           terraform init \
             -reconfigure \
             -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
-            -backend-config="key=${{ matrix.environment }}/terraform.tfstate" \
+            -backend-config="key=aws/terraform.tfstate" \
             -backend-config="region=${{ secrets.TF_STATE_BUCKET_REGION || env.AWS_REGION }}" \
             -backend-config="encrypt=true"
 
@@ -160,8 +157,8 @@ jobs:
       - name: Upload Terraform Plan
         uses: actions/upload-artifact@v4
         with:
-          name: tfplan-${{ matrix.environment }}
-          path: ./terraform/${{ matrix.environment }}/tfplan
+          name: tfplan-aws
+          path: ./terraform/aws/tfplan
           retention-days: 7
 
   # ========================================================================
@@ -173,14 +170,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: [plan-aws]
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.terraform_action == 'apply'
-    strategy:
-      matrix:
-        environment: [aws]
-      fail-fast: false
 
     defaults:
       run:
-        working-directory: ./terraform/${{ matrix.environment }}
+        working-directory: ./terraform/aws
 
     permissions:
       contents: read
@@ -208,15 +201,15 @@ jobs:
           terraform init \
             -reconfigure \
             -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
-            -backend-config="key=${{ matrix.environment }}/terraform.tfstate" \
+            -backend-config="key=aws/terraform.tfstate" \
             -backend-config="region=${{ secrets.TF_STATE_BUCKET_REGION || env.AWS_REGION }}" \
             -backend-config="encrypt=true"
 
       - name: Download Terraform Plan
         uses: actions/download-artifact@v4
         with:
-          name: tfplan-${{ matrix.environment }}
-          path: ./terraform/${{ matrix.environment }}
+          name: tfplan-aws
+          path: ./terraform/aws
 
       - name: Terraform Apply
         run: terraform apply -auto-approve tfplan
@@ -228,15 +221,16 @@ jobs:
   destroy-aws:
     name: 'destroy:aws'
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.terraform_action == 'destroy'
-    strategy:
-      matrix:
-        environment: [aws]
-      fail-fast: false
+    needs: [apply-aws]
+    if: |
+      always() &&
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.terraform_action == 'destroy' &&
+      (needs.apply-aws.result == 'success' || needs.apply-aws.result == 'skipped')
 
     defaults:
       run:
-        working-directory: ./terraform/${{ matrix.environment }}
+        working-directory: ./terraform/aws
 
     permissions:
       contents: read
@@ -264,7 +258,7 @@ jobs:
           terraform init \
             -reconfigure \
             -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
-            -backend-config="key=${{ matrix.environment }}/terraform.tfstate" \
+            -backend-config="key=aws/terraform.tfstate" \
             -backend-config="region=${{ secrets.TF_STATE_BUCKET_REGION || env.AWS_REGION }}" \
             -backend-config="encrypt=true"
 
