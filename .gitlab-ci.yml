@@ -1,11 +1,10 @@
 # GitLab CI/CD Pipeline for Terraform Deployment
 #
 # Pipeline Structure:
-# 1. FORMAT stage   - Validate Terraform code formatting
-# 2. VALIDATE stage - Validate Terraform configuration
-# 3. PLAN stage     - Generate Terraform plan
-# 4. APPLY stage    - Deploy infrastructure (manual approval required)
-# 5. DESTROY stage  - Destroy infrastructure (manual only)
+# 1. VALIDATE stage - Validate Terraform configuration
+# 2. PLAN stage     - Generate Terraform plan
+# 3. APPLY stage    - Deploy infrastructure (manual approval required)
+# 4. DESTROY stage  - Destroy infrastructure (manual only)
 
 variables:
   # @param terraform.version
@@ -22,10 +21,11 @@ cache:
   paths:
     - ${TF_ROOT}/aws/.terraform/providers
     - ${TF_ROOT}/aws/.terraform.lock.hcl
+    - ${TF_ROOT}/kubernetes/.terraform/providers
+    - ${TF_ROOT}/kubernetes/.terraform.lock.hcl
 
 # Pipeline stages
 stages:
-  - format    # Validate Terraform code formatting
   - validate  # Validate Terraform configuration
   - plan      # Generate execution plan
   - apply     # Deploy infrastructure (manual approval required)
@@ -35,7 +35,7 @@ stages:
 # SHARED TEMPLATES
 # ========================================================================
 
-# Base template for Terraform jobs (AWS creds come from CI/CD variables)
+# Base template for AWS Terraform jobs
 .terraform_base:
   image:
     name: hashicorp/terraform:${TF_VERSION}
@@ -45,21 +45,15 @@ stages:
     - terraform --version
     - terraform init -reconfigure
 
-# ========================================================================
-# FORMAT STAGE - Validate Terraform code formatting
-# ========================================================================
-
-format:aws:
-  stage: format
+# Base template for Kubernetes Terraform jobs
+.terraform_base_k8s:
   image:
     name: hashicorp/terraform:${TF_VERSION}
     entrypoint: [""]
-  script:
-    - cd ${TF_ROOT}
-    - terraform fmt -recursive -check
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: '$CI_COMMIT_BRANCH == "main"'
+  before_script:
+    - cd ${TF_ROOT}/kubernetes
+    - terraform --version
+    - terraform init -reconfigure
 
 # ========================================================================
 # VALIDATE STAGE - Validate Terraform configuration
@@ -72,6 +66,20 @@ validate:aws:
     entrypoint: [""]
   script:
     - cd ${TF_ROOT}/aws
+    - terraform --version
+    - terraform init -backend=false
+    - terraform validate
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+validate:k8s:
+  stage: validate
+  image:
+    name: hashicorp/terraform:${TF_VERSION}
+    entrypoint: [""]
+  script:
+    - cd ${TF_ROOT}/kubernetes
     - terraform --version
     - terraform init -backend=false
     - terraform validate
@@ -104,6 +112,27 @@ plan:aws:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
     - if: '$CI_COMMIT_BRANCH == "main"'
 
+plan:k8s:
+  extends: .terraform_base_k8s
+  stage: plan
+  script:
+    - terraform plan -out=tfplan -no-color | tee plan.txt
+    - terraform show -no-color tfplan > tfplan.txt
+    - terraform show -json tfplan > tfplan.json
+  artifacts:
+    name: "terraform-plan-k8s-${CI_COMMIT_SHORT_SHA}"
+    paths:
+      - ${TF_ROOT}/kubernetes/tfplan
+      - ${TF_ROOT}/kubernetes/tfplan.txt
+      - ${TF_ROOT}/kubernetes/tfplan.json
+      - ${TF_ROOT}/kubernetes/plan.txt
+    expire_in: 7 days
+    reports:
+      terraform: ${TF_ROOT}/kubernetes/tfplan.json
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
 # ========================================================================
 # APPLY STAGE - Requires manual approval via GitLab Environment protection
 # ========================================================================
@@ -127,9 +156,40 @@ apply:aws:
     - if: '$CI_COMMIT_BRANCH == "main"'
       when: manual
 
+apply:k8s:
+  extends: .terraform_base_k8s
+  stage: apply
+  environment:
+    name: production
+  script:
+    - terraform apply -auto-approve tfplan
+    - terraform output -json > outputs.json
+  dependencies:
+    - plan:k8s
+  artifacts:
+    name: "terraform-outputs-k8s-${CI_COMMIT_SHORT_SHA}"
+    paths:
+      - ${TF_ROOT}/kubernetes/outputs.json
+    expire_in: 30 days
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+
 # ========================================================================
 # DESTROY STAGE - Manual destruction only
 # ========================================================================
+
+destroy:k8s:
+  extends: .terraform_base_k8s
+  stage: destroy
+  environment:
+    name: production
+  script:
+    - terraform destroy -auto-approve
+  dependencies: []
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
 
 destroy:aws:
   extends: .terraform_base
@@ -139,6 +199,7 @@ destroy:aws:
   script:
     - terraform destroy -auto-approve
   dependencies: []
+  needs: [destroy:k8s]
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
       when: manual
