@@ -1,8 +1,8 @@
 globals:
   # @param argocd.git_repo_url
-  repoURL: git@github.com:devopsgroupeu/openprime-infra-templates.git
+  repoURL: ""
   # @param argocd.targetRevision
-  targetRevision: main
+  targetRevision: "HEAD"
 
 appProjects:
   # @section helmCharts.awsLBController.enabled begin

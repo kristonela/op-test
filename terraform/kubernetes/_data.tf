@@ -1,17 +1,17 @@
 # @section backend begin
-# data "terraform_remote_state" "aws" {
-  # backend = "s3"
+data "terraform_remote_state" "aws" {
+  backend = "s3"
 
-  # config = {
+  config = {
     # @param terraformBackend.bucketName
-    # bucket = "my-terraform-state-bucket"
-    # key    = "aws.tfstate"
+    bucket = "ope-pipeline-test-github-tfstate"
+    key    = "aws.tfstate"
     # @param region
-    # region = "eu-west-1"
+    region = "us-east-1"
     # @param terraformBackend.encrypt
-    # encrypt = true
+    encrypt = true
     # @param terraformBackend.useLockfile
-    # use_lockfile = true
-  # }
-# }
+    use_lockfile = true
+  }
+}
 # @section backend end
