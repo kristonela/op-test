@@ -26,6 +26,7 @@ cache:
 
 # Pipeline stages
 stages:
+  - format    # Format Terraform code
   - validate  # Validate Terraform configuration
   - plan      # Generate execution plan
   - apply     # Deploy infrastructure (manual approval required)
@@ -56,11 +57,40 @@ stages:
     - terraform init -reconfigure
 
 # ========================================================================
+# FORMAT STAGE - Format Terraform code
+# ========================================================================
+
+format:aws:
+  stage: format
+  image:
+    name: hashicorp/terraform:${TF_VERSION}
+    entrypoint: [""]
+  script:
+    - cd ${TF_ROOT}/aws
+    - terraform fmt -recursive
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+format:k8s:
+  stage: format
+  image:
+    name: hashicorp/terraform:${TF_VERSION}
+    entrypoint: [""]
+  script:
+    - cd ${TF_ROOT}/kubernetes
+    - terraform fmt -recursive
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+# ========================================================================
 # VALIDATE STAGE - Validate Terraform configuration
 # ========================================================================
 
 validate:aws:
   stage: validate
+  needs: [format:aws]
   image:
     name: hashicorp/terraform:${TF_VERSION}
     entrypoint: [""]
@@ -75,6 +105,7 @@ validate:aws:
 
 validate:k8s:
   stage: validate
+  needs: [format:k8s]
   image:
     name: hashicorp/terraform:${TF_VERSION}
     entrypoint: [""]
