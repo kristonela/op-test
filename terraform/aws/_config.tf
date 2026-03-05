@@ -7,7 +7,7 @@ terraform {
     bucket = "ope-pipeline-test-github-tfstate"
     key    = "aws.tfstate"
     # @param region
-    region = "us-east-1"
+    region = "eu-west-1"
     # @param terraformBackend.encrypt
     encrypt = true
     # @param terraformBackend.useLockfile
