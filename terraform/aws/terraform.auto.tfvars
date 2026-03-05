@@ -3,7 +3,7 @@
 # -------------------------------------------------------------------
 
 # @param region
-region = "us-east-1"
+region = "eu-west-1"
 # @param name
 global_prefix = "kp"
 # @param name

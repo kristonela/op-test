@@ -161,8 +161,7 @@ plan:k8s:
     reports:
       terraform: ${TF_ROOT}/kubernetes/tfplan.json
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: '$CI_COMMIT_BRANCH == "main"'
+    - when: never
 
 # ========================================================================
 # APPLY STAGE - Requires manual approval via GitLab Environment protection
@@ -203,8 +202,7 @@ apply:k8s:
       - ${TF_ROOT}/kubernetes/outputs.json
     expire_in: 30 days
   rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-      when: manual
+    - when: never
 
 # ========================================================================
 # DESTROY STAGE - Manual destruction only
@@ -219,8 +217,7 @@ destroy:k8s:
     - terraform destroy -auto-approve
   dependencies: []
   rules:
-    - if: '$CI_COMMIT_BRANCH == "main"'
-      when: manual
+    - when: never
 
 destroy:aws:
   extends: .terraform_base
@@ -230,7 +227,9 @@ destroy:aws:
   script:
     - terraform destroy -auto-approve
   dependencies: []
-  needs: [destroy:k8s]
+  needs:
+    - job: destroy:k8s
+      optional: true
   rules:
     - if: '$CI_COMMIT_BRANCH == "main"'
       when: manual
